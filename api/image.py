@@ -76,12 +76,14 @@ class Normal_Image(ImageLoader):
             ImageRegion = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
             MaskRegion = ''
-            use_cuda = request.form.get('use_cuda', 'false').lower() == 'true'
-            print(f"use_cuda: {use_cuda}")
-            print(f"CUDA_AVAILABLE: {CUDA_AVAILABLE}")
-            if use_cuda and CUDA_AVAILABLE:
+            acceleration = request.form.get('acceleration', 'CPU')
+            print(f"Acceleration mode: {acceleration}")
+
+            if acceleration == 'CVCUDA' and Do_Task_CUDA is not None:
+                print("Using CV-CUDA (PyCUDA) for preprocessing.")
                 (ImageRegion,MaskRegion) = Do_Task_CUDA(ImageRegion,MaskRegion,request)
             else:
+                print(f"Using standard preprocessing (CPU or OpenCV CUDA).")
                 (ImageRegion,MaskRegion) = Do_Task(ImageRegion,MaskRegion,request)
             IntegrationRegion = ImageRegion[0]
 
@@ -119,13 +121,14 @@ class OpenSlide_Image(ImageLoader):
             print("MaskRegion is an empty string.")
         else:
             print(f"MaskRegion is not an empty string.:{MaskRegion}")
-        use_cuda = request.form.get('use_cuda', 'false').lower() == 'true'
-        
-        print(f"use_cuda: {use_cuda}")
-        print(f"CUDA_AVAILABLE: {CUDA_AVAILABLE}")
-        if use_cuda and CUDA_AVAILABLE:
+        acceleration = request.form.get('acceleration', 'CPU')
+        print(f"Acceleration mode: {acceleration}")
+
+        if acceleration == 'CVCUDA' and Do_Task_CUDA is not None:
+            print("Using CV-CUDA (PyCUDA) for preprocessing.")
             (ImageRegion,MaskRegion) = Do_Task_CUDA(ImageRegion,MaskRegion,request)
         else:
+            print(f"Using standard preprocessing (CPU or OpenCV CUDA).")
             (ImageRegion,MaskRegion) = Do_Task(ImageRegion,MaskRegion,request)
         IntegrationRegion = ImageRegion[0]
 
@@ -178,10 +181,14 @@ class DCM_Image(ImageLoader):
         
         ImageRegion = nparray_to_pngbase64str(back)
         MaskRegion = nparray_to_pngbase64str(mask)
-        use_cuda = request.form.get('use_cuda', 'false').lower() == 'true'
-        if use_cuda and CUDA_AVAILABLE:
+        acceleration = request.form.get('acceleration', 'CPU')
+        print(f"Acceleration mode: {acceleration}")
+
+        if acceleration == 'CVCUDA' and Do_Task_CUDA is not None:
+            print("Using CV-CUDA (PyCUDA) for preprocessing.")
             (ImageRegion,MaskRegion) = Do_Task_CUDA(ImageRegion,MaskRegion,request)
         else:
+            print(f"Using standard preprocessing (CPU or OpenCV CUDA).")
             (ImageRegion,MaskRegion) = Do_Task(ImageRegion,MaskRegion,request)
         
         # 將 bytes 轉換成 np.array

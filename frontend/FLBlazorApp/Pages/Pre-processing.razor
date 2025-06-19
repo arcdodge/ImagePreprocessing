@@ -110,9 +110,22 @@
 				<h6 class="m-0 font-weight-bold text-primary">Pre-processing function</h6>
 			</div>
 			<div class="card-body" style="overflow-y:auto;max-height:805px">
-				<div class="form-check form-switch mb-2">
-					<input class="form-check-input" type="checkbox" id="useCudaSwitch" @bind="useCuda">
-					<label class="form-check-label" for="useCudaSwitch">Use CUDA Acceleration</label>
+				<div class="mb-3">
+					<label class="form-label">Acceleration</label>
+					<div class="d-flex justify-content-around">
+						<div class="form-check">
+							<input class="form-check-input" type="radio" name="accelerationOptions" id="cpuRadio" value="CPU" checked="@(accelerationMethod == "CPU")" @onchange="@(() => { accelerationMethod = "CPU"; PreprocessingValueChanged(); })" />
+							<label class="form-check-label" for="cpuRadio">CPU</label>
+						</div>
+						<div class="form-check">
+							<input class="form-check-input" type="radio" name="accelerationOptions" id="cvcudaRadio" value="CVCUDA" checked="@(accelerationMethod == "CVCUDA")" @onchange="@(() => { accelerationMethod = "CVCUDA"; PreprocessingValueChanged(); })" />
+							<label class="form-check-label" for="cvcudaRadio">CV-CUDA</label>
+						</div>
+						<div class="form-check">
+							<input class="form-check-input" type="radio" name="accelerationOptions" id="cudaRadio" value="CUDA" checked="@(accelerationMethod == "CUDA")" @onchange="@(() => { accelerationMethod = "CUDA"; PreprocessingValueChanged(); })" />
+							<label class="form-check-label" for="cudaRadio">CUDA</label>
+						</div>
+					</div>
 				</div>
 				<button type="button" class="btn btn-success" style="width:100%" @onclick="SAVE">Save</button>
 				<hr />
@@ -142,7 +155,7 @@
 	</div>
 }
 @code {
-	private bool useCuda = false;
+	private string accelerationMethod = "CPU";
 	private IObservable<string> Frames { get; }
 	private IDisposable disSubscribeLive;
 
@@ -168,7 +181,7 @@
 	}
 	private async Task oaw()
 	{
-		await ImageLoader.GetRegionAsync((int)ImageOffsetLT.X, (int)ImageOffsetLT.Y, MainROISize, MainROISize, GetPreprocessingTaskStr(), useCuda);
+		await ImageLoader.GetRegionAsync((int)ImageOffsetLT.X, (int)ImageOffsetLT.Y, MainROISize, MainROISize, GetPreprocessingTaskStr(), accelerationMethod);
 		IntegrationRegionImg = ImageLoader.AfterShowImg;
 		InvokeAsync(StateHasChanged);
 	}
@@ -269,6 +282,7 @@
 		}
 		preprocessTask += "]";
 		values.Add("preprocess_task", preprocessTask);
+		values.Add("acceleration", accelerationMethod);
 
 		return values;
 	}
@@ -515,7 +529,7 @@
 
 		RefreshThumbnailROI();
 
-		await ImageLoader.GetRegionAsync((int)ImageOffsetLT.X, (int)ImageOffsetLT.Y, MainROISize, MainROISize, GetPreprocessingTaskStr(), useCuda);
+		await ImageLoader.GetRegionAsync((int)ImageOffsetLT.X, (int)ImageOffsetLT.Y, MainROISize, MainROISize, GetPreprocessingTaskStr(), accelerationMethod);
 		IntegrationRegionImg = ImageLoader.AfterShowImg;
 		InvokeAsync(StateHasChanged);
 	}
@@ -735,7 +749,7 @@
 		{
 			for (int i = (int)Math.Floor(bound.X); i < Math.Floor(bound.X + bound.Width); i += tileSize)
 			{
-				await ImageLoader.GetRegionAsync(i, j, tileSize, tileSize, GetPreprocessingTaskStr(), useCuda);
+				await ImageLoader.GetRegionAsync(i, j, tileSize, tileSize, GetPreprocessingTaskStr(), accelerationMethod);
 
 				ImageLoader.SavePreprocessedImg(saveDir, fileName, PrefixStr, PrefixNo+count, saveType);
 				count++;

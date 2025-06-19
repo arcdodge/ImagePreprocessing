@@ -5,14 +5,8 @@ from PIL import Image
 from io import BytesIO
 import time
 
-def is_cuda_available():
-    try:
-        return cv2.cuda.getCudaEnabledDeviceCount() > 0
-    except:
-        return False
-
-CUDA_AVAILABLE = is_cuda_available() & True
-print("CUDA available:", CUDA_AVAILABLE)
+# This global variable will be set per request
+CUDA_AVAILABLE = False
 
 def decode_image_base64(img_data: str):
     byte_arr = base64.b64decode(img_data)
@@ -24,6 +18,21 @@ def nparray_to_pngbase64str(img: np.ndarray):
     return base64.b64encode(buffer).decode('utf-8')
 
 def Do_Task(ImageRegion, MaskRegion, request):
+    global CUDA_AVAILABLE
+    acceleration = request.form.get('acceleration', 'CPU')
+    
+    if acceleration == 'CUDA' and cv2.cuda.getCudaEnabledDeviceCount() > 0:
+        CUDA_AVAILABLE = True
+    elif acceleration == 'CVCUDA':
+        # For now, let's assume CVCUDA also means we use the CUDA path.
+        # You might have a separate library or functions for CV-CUDA.
+        # We will need to read preprocessing_cuda.py to be sure.
+        CUDA_AVAILABLE = True
+    else:
+        CUDA_AVAILABLE = False
+        
+    print(f"Acceleration mode: {acceleration}, CUDA_AVAILABLE: {CUDA_AVAILABLE}")
+
     print('****************preprocessing**********************')
     preprocess_task = (request.form.getlist('preprocess_task')[0]).strip('[]').replace('"', '').split(',')
     if len(preprocess_task) > 0:
