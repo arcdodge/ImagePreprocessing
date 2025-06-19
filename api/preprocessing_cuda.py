@@ -4,8 +4,26 @@ import cv2
 from io import BytesIO
 import time
 import pycuda.driver as cuda
-import pycuda.autoinit
 from pycuda.compiler import SourceModule
+import threading
+
+# Thread-local storage for CUDA context
+_thread_local = threading.local()
+
+class CudaContextManager:
+    """A context manager to handle CUDA context for each thread."""
+    def __enter__(self):
+        if not hasattr(_thread_local, 'context'):
+            cuda.init()
+            device = cuda.Device(0)
+            _thread_local.context = device.make_context()
+        else:
+            _thread_local.context.push()
+        return _thread_local.context
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(_thread_local, 'context'):
+            _thread_local.context.pop()
 
 # --- Helper Functions ---
 
@@ -24,13 +42,9 @@ def nparray_to_pngbase64str(img: np.ndarray):
 
 def apply_lut_pycuda(img_data: str, lut_value: float) -> str:
     """Applies Gamma Correction using a custom PyCUDA kernel."""
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_apply_lut = SourceModule("""
-        __global__ void apply_lut_kernel(unsigned char *dest, const unsigned char *src, const unsigned char *lut, int width, int height, int channels)
-        {
+    mod_apply_lut = SourceModule("""
+    __global__ void apply_lut_kernel(unsigned char *dest, const unsigned char *src, const unsigned char *lut, int width, int height, int channels)
+    {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             int stride = blockDim.x * gridDim.x;
 
@@ -40,45 +54,43 @@ def apply_lut_pycuda(img_data: str, lut_value: float) -> str:
             }
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
 
-        lut_cpu = np.array([np.clip(pow(i / 255.0, lut_value) * 255.0, 0, 255) for i in range(256)], dtype=np.uint8)
+    lut_cpu = np.array([np.clip(pow(i / 255.0, lut_value) * 255.0, 0, 255) for i in range(256)], dtype=np.uint8)
 
-        img_gpu = cuda.mem_alloc(img.nbytes)
-        lut_gpu = cuda.mem_alloc(lut_cpu.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
+    img_gpu = cuda.mem_alloc(img.nbytes)
+    lut_gpu = cuda.mem_alloc(lut_cpu.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
 
-        cuda.memcpy_htod(img_gpu, img)
-        cuda.memcpy_htod(lut_gpu, lut_cpu)
+    cuda.memcpy_htod(img_gpu, img)
+    cuda.memcpy_htod(lut_gpu, lut_cpu)
 
-        apply_lut_kernel = mod_apply_lut.get_function("apply_lut_kernel")
+    apply_lut_kernel = mod_apply_lut.get_function("apply_lut_kernel")
 
-        block_size = 256
-        grid_size = (width * height * channels + block_size - 1) // block_size
+    block_size = 256
+    grid_size = (width * height * channels + block_size - 1) // block_size
 
-        start_time = time.perf_counter()
-        apply_lut_kernel(
-            dest_gpu, img_gpu, lut_gpu,
-            np.int32(width), np.int32(height), np.int32(channels),
-            block=(block_size, 1, 1), grid=(grid_size, 1)
-        )
-        ctx.synchronize()
-        end_time = time.perf_counter()
-        print(f"[PyCUDA] apply_lut - Time: {(end_time - start_time) * 1000:.3f} ms")
+    start_time = time.perf_counter()
+    apply_lut_kernel(
+        dest_gpu, img_gpu, lut_gpu,
+        np.int32(width), np.int32(height), np.int32(channels),
+        block=(block_size, 1, 1), grid=(grid_size, 1)
+    )
+    cuda.Context.synchronize()
+    end_time = time.perf_counter()
+    print(f"[PyCUDA] apply_lut - Time: {(end_time - start_time) * 1000:.3f} ms")
 
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
 
-        img_gpu.free()
-        lut_gpu.free()
-        dest_gpu.free()
+    img_gpu.free()
+    lut_gpu.free()
+    dest_gpu.free()
 
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    return nparray_to_pngbase64str(result_img)
 
 # --- CUDA Kernel for Image Rotation ---
 
@@ -162,13 +174,9 @@ def transformation_degrees_pycuda(img_data: str, degree_int: int) -> str:
 
 def flip_pycuda(img_data: str, flip_type: str) -> str:
     """Flips an image using a custom PyCUDA kernel."""
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_flip = SourceModule("""
-        __global__ void flip_kernel(unsigned char *dest, const unsigned char *src, int width, int height, int channels, int flip_x, int flip_y)
-        {
+    mod_flip = SourceModule("""
+    __global__ void flip_kernel(unsigned char *dest, const unsigned char *src, int width, int height, int channels, int flip_x, int flip_y)
+    {
             int dest_x = blockIdx.x * blockDim.x + threadIdx.x;
             int dest_y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -183,41 +191,39 @@ def flip_pycuda(img_data: str, flip_type: str) -> str:
             for (int c = 0; c < channels; c++) dest[dest_idx + c] = src[src_idx + c];
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
 
-        flip_x = 'X' in flip_type
-        flip_y = 'Y' in flip_type
-        if not flip_x and not flip_y: return nparray_to_pngbase64str(img)
+    flip_x = 'X' in flip_type
+    flip_y = 'Y' in flip_type
+    if not flip_x and not flip_y: return nparray_to_pngbase64str(img)
 
-        img_gpu = cuda.mem_alloc(img.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
-        cuda.memcpy_htod(img_gpu, img)
+    img_gpu = cuda.mem_alloc(img.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
+    cuda.memcpy_htod(img_gpu, img)
 
-        flip_kernel = mod_flip.get_function("flip_kernel")
-        block_dim = (16, 16, 1)
-        grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
+    flip_kernel = mod_flip.get_function("flip_kernel")
+    block_dim = (16, 16, 1)
+    grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
 
-        start_time = time.perf_counter()
-        flip_kernel(
-            dest_gpu, img_gpu,
-            np.int32(width), np.int32(height), np.int32(channels),
-            np.int32(flip_x), np.int32(flip_y),
-            block=block_dim, grid=grid_dim
-        )
-        ctx.synchronize()
-        end_time = time.perf_counter()
-        print(f"[PyCUDA] flip({flip_type}) - Time: {(end_time - start_time) * 1000:.3f} ms")
+    start_time = time.perf_counter()
+    flip_kernel(
+        dest_gpu, img_gpu,
+        np.int32(width), np.int32(height), np.int32(channels),
+        np.int32(flip_x), np.int32(flip_y),
+        block=block_dim, grid=grid_dim
+    )
+    cuda.Context.synchronize()
+    end_time = time.perf_counter()
+    print(f"[PyCUDA] flip({flip_type}) - Time: {(end_time - start_time) * 1000:.3f} ms")
 
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
-        img_gpu.free()
-        dest_gpu.free()
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
+    img_gpu.free()
+    dest_gpu.free()
+    return nparray_to_pngbase64str(result_img)
 
 # --- CUDA Kernel for Gaussian Blur ---
 
@@ -235,14 +241,10 @@ def create_opencv_gaussian_kernel(kernel_size: int, sigma: float) -> np.ndarray:
 
 def apply_gaussian_blur_pycuda(img_data: str, kernel_size: int, sigma: float) -> str:
     """Applies Gaussian Blur using a custom PyCUDA kernel, corrected for consistency."""
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_gaussian_blur_color = SourceModule("""
-        #include <math.h>
+    mod_gaussian_blur_color = SourceModule("""
+    #include <math.h>
 
-        __device__ int border_reflect_101(int x, int max_val) {
+    __device__ int border_reflect_101(int x, int max_val) {
             if (x < 0) {
                 return -x - 1;
             }
@@ -287,45 +289,43 @@ def apply_gaussian_blur_pycuda(img_data: str, kernel_size: int, sigma: float) ->
             }
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
 
-        gaussian_kernel_cpu = create_opencv_gaussian_kernel(kernel_size, sigma)
+    gaussian_kernel_cpu = create_opencv_gaussian_kernel(kernel_size, sigma)
 
-        src_gpu = cuda.mem_alloc(img.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
-        kernel_gpu = cuda.mem_alloc(gaussian_kernel_cpu.nbytes)
-        cuda.memcpy_htod(src_gpu, img)
-        cuda.memcpy_htod(kernel_gpu, gaussian_kernel_cpu)
+    src_gpu = cuda.mem_alloc(img.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
+    kernel_gpu = cuda.mem_alloc(gaussian_kernel_cpu.nbytes)
+    cuda.memcpy_htod(src_gpu, img)
+    cuda.memcpy_htod(kernel_gpu, gaussian_kernel_cpu)
 
-        gaussian_blur_kernel = mod_gaussian_blur_color.get_function("gaussian_blur_kernel")
-        block_dim = (16, 16, 1)
-        grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
+    gaussian_blur_kernel = mod_gaussian_blur_color.get_function("gaussian_blur_kernel")
+    block_dim = (16, 16, 1)
+    grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
 
-        start_event = cuda.Event()
-        end_event = cuda.Event()
+    start_event = cuda.Event()
+    end_event = cuda.Event()
 
-        start_event.record()
-        gaussian_blur_kernel(
-            dest_gpu, src_gpu, kernel_gpu,
-            np.int32(width), np.int32(height), np.int32(channels), np.int32(kernel_size),
-            block=block_dim, grid=grid_dim
-        )
-        end_event.record()
-        end_event.synchronize()
-        elapsed_ms = start_event.time_till(end_event)
-        print(f"[PyCUDA] apply_gaussian_blur - Time: {elapsed_ms:.3f} ms")
+    start_event.record()
+    gaussian_blur_kernel(
+        dest_gpu, src_gpu, kernel_gpu,
+        np.int32(width), np.int32(height), np.int32(channels), np.int32(kernel_size),
+        block=block_dim, grid=grid_dim
+    )
+    end_event.record()
+    end_event.synchronize()
+    elapsed_ms = start_event.time_till(end_event)
+    print(f"[PyCUDA] apply_gaussian_blur - Time: {elapsed_ms:.3f} ms")
 
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
-        src_gpu.free()
-        dest_gpu.free()
-        kernel_gpu.free()
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
+    src_gpu.free()
+    dest_gpu.free()
+    kernel_gpu.free()
+    return nparray_to_pngbase64str(result_img)
 
 # --- CUDA Kernel for Mean Blur ---
 
@@ -334,10 +334,6 @@ def apply_mean_blur_pycuda(img_data: str, kernel_size: int) -> str:
     Applies Mean Blur using a custom PyCUDA kernel.
     FINAL CORRECTED VERSION with rounding to match OpenCV's behavior.
     """
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    
     mod_mean_blur = SourceModule("""
     #include <math.h>
 
@@ -378,46 +374,41 @@ def apply_mean_blur_pycuda(img_data: str, kernel_size: int) -> str:
         }
     }
     """)
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
+
+    img_gpu = cuda.mem_alloc(img.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
+    cuda.memcpy_htod(img_gpu, img)
+
+    mean_blur_kernel = mod_mean_blur.get_function("mean_blur_kernel")
+    block_dim = (16, 16, 1)
+    grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
+
+    start_event = cuda.Event()
+    end_event = cuda.Event()
+
+    start_event.record()
+    mean_blur_kernel(
+        dest_gpu, img_gpu,
+        np.int32(width), np.int32(height), np.int32(channels), np.int32(kernel_size),
+        block=block_dim, grid=grid_dim
+    )
+    end_event.record()
+    end_event.synchronize()
     
-    try:
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    elapsed_ms = start_event.time_till(end_event)
+    print(f"[PyCUDA] apply_mean_blur_pycuda - Time: {elapsed_ms:.3f} ms")
 
-        img_gpu = cuda.mem_alloc(img.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
-        cuda.memcpy_htod(img_gpu, img)
-
-        mean_blur_kernel = mod_mean_blur.get_function("mean_blur_kernel")
-        block_dim = (16, 16, 1)
-        grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
-
-        start_event = cuda.Event()
-        end_event = cuda.Event()
-
-        start_event.record()
-        mean_blur_kernel(
-            dest_gpu, img_gpu,
-            np.int32(width), np.int32(height), np.int32(channels), np.int32(kernel_size),
-            block=block_dim, grid=grid_dim
-        )
-        end_event.record()
-        end_event.synchronize()
-        
-        elapsed_ms = start_event.time_till(end_event)
-        print(f"[PyCUDA] apply_mean_blur_pycuda - Time: {elapsed_ms:.3f} ms")
-
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
-        
-        img_gpu.free()
-        dest_gpu.free()
-        
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
+    
+    img_gpu.free()
+    dest_gpu.free()
+    
+    return nparray_to_pngbase64str(result_img)
 
 # --- CUDA Kernel for Bilateral Filter ---
 
@@ -426,14 +417,10 @@ def apply_bilateral_filter_pycuda(img_data: str, diameter: int, sigmaColor: floa
     Applies Bilateral Filter using a custom PyCUDA kernel.
     FINAL PERFECTED VERSION with circular neighborhood and rounding.
     """
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_bilateral_filter = SourceModule("""
-        #include <math.h>
+    mod_bilateral_filter = SourceModule("""
+    #include <math.h>
 
-        __device__ int clamp(int x, int min_val, int max_val) {
+    __device__ int clamp(int x, int min_val, int max_val) {
             return min(max(x, min_val), max_val);
         }
 
@@ -493,53 +480,47 @@ def apply_bilateral_filter_pycuda(img_data: str, diameter: int, sigmaColor: floa
             if (channels > 3) dest[dest_idx + 3] = src[center_idx + 3];
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
 
-        img_gpu = cuda.mem_alloc(img.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
-        cuda.memcpy_htod(img_gpu, img)
+    img_gpu = cuda.mem_alloc(img.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
+    cuda.memcpy_htod(img_gpu, img)
 
-        bilateral_filter_kernel = mod_bilateral_filter.get_function("bilateral_filter_kernel")
-        block_dim = (8, 8, 1)
-        grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
+    bilateral_filter_kernel = mod_bilateral_filter.get_function("bilateral_filter_kernel")
+    block_dim = (8, 8, 1)
+    grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
 
-        start_event = cuda.Event()
-        end_event = cuda.Event()
-        start_event.record()
-        bilateral_filter_kernel(
-            dest_gpu, img_gpu,
-            np.int32(width), np.int32(height), np.int32(channels),
-            np.int32(diameter), np.float32(sigmaColor), np.float32(sigmaSpace),
-            block=block_dim, grid=grid_dim
-        )
-        end_event.record()
-        end_event.synchronize()
-        elapsed_ms = start_event.time_till(end_event)
-        print(f"[PyCUDA] apply_bilateral_filter - Time: {elapsed_ms:.3f} ms")
+    start_event = cuda.Event()
+    end_event = cuda.Event()
+    start_event.record()
+    bilateral_filter_kernel(
+        dest_gpu, img_gpu,
+        np.int32(width), np.int32(height), np.int32(channels),
+        np.int32(diameter), np.float32(sigmaColor), np.float32(sigmaSpace),
+        block=block_dim, grid=grid_dim
+    )
+    end_event.record()
+    end_event.synchronize()
+    elapsed_ms = start_event.time_till(end_event)
+    print(f"[PyCUDA] apply_bilateral_filter - Time: {elapsed_ms:.3f} ms")
 
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
-        img_gpu.free()
-        dest_gpu.free()
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
+    img_gpu.free()
+    dest_gpu.free()
+    return nparray_to_pngbase64str(result_img)
 
 # --- CUDA Kernels for Canny Edge Detection ---
 
 def apply_canny_pycuda(img_data: str, th1: float, th2: float) -> str:
     """Applies Canny Edge Detection using custom PyCUDA kernels."""
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_canny = SourceModule("""
-        #include <math.h>
+    mod_canny = SourceModule("""
+    #include <math.h>
 
-        __global__ void sobel_filter_kernel(unsigned char *magnitude, float *direction, const unsigned char *src, int width, int height)
+    __global__ void sobel_filter_kernel(unsigned char *magnitude, float *direction, const unsigned char *src, int width, int height)
         {
             int x = blockIdx.x * blockDim.x + threadIdx.x;
             int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -632,77 +613,71 @@ def apply_canny_pycuda(img_data: str, th1: float, th2: float) -> str:
             }
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        height, width, _ = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    height, width, _ = img.shape
 
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
-        blurred_img = cv2.GaussianBlur(gray_img, (5, 5), 1.4)
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
+    blurred_img = cv2.GaussianBlur(gray_img, (5, 5), 1.4)
 
-        blurred_gpu = cuda.mem_alloc(blurred_img.nbytes)
-        magnitude_gpu = cuda.mem_alloc(blurred_img.nbytes)
-        direction_gpu = cuda.mem_alloc(blurred_img.astype(np.float32).nbytes)
-        nms_gpu = cuda.mem_alloc(blurred_img.nbytes)
-        threshold_gpu = cuda.mem_alloc(blurred_img.nbytes)
-        cuda.memcpy_htod(blurred_gpu, blurred_img)
+    blurred_gpu = cuda.mem_alloc(blurred_img.nbytes)
+    magnitude_gpu = cuda.mem_alloc(blurred_img.nbytes)
+    direction_gpu = cuda.mem_alloc(blurred_img.astype(np.float32).nbytes)
+    nms_gpu = cuda.mem_alloc(blurred_img.nbytes)
+    threshold_gpu = cuda.mem_alloc(blurred_img.nbytes)
+    cuda.memcpy_htod(blurred_gpu, blurred_img)
 
-        sobel_kernel = mod_canny.get_function("sobel_filter_kernel")
-        nms_kernel = mod_canny.get_function("non_max_suppression_kernel")
-        threshold_kernel = mod_canny.get_function("double_threshold_kernel")
-        hysteresis_propagate_kernel = mod_canny.get_function("hysteresis_propagate_kernel")
-        hysteresis_finalize_kernel = mod_canny.get_function("hysteresis_finalize_kernel")
+    sobel_kernel = mod_canny.get_function("sobel_filter_kernel")
+    nms_kernel = mod_canny.get_function("non_max_suppression_kernel")
+    threshold_kernel = mod_canny.get_function("double_threshold_kernel")
+    hysteresis_propagate_kernel = mod_canny.get_function("hysteresis_propagate_kernel")
+    hysteresis_finalize_kernel = mod_canny.get_function("hysteresis_finalize_kernel")
 
-        block_dim_2d = (16, 16, 1)
-        grid_dim_2d = ((width + block_dim_2d[0] - 1) // block_dim_2d[0], (height + block_dim_2d[1] - 1) // block_dim_2d[1])
-        block_dim_1d = 256
-        grid_dim_1d = (width * height + block_dim_1d - 1) // block_dim_1d
+    block_dim_2d = (16, 16, 1)
+    grid_dim_2d = ((width + block_dim_2d[0] - 1) // block_dim_2d[0], (height + block_dim_2d[1] - 1) // block_dim_2d[1])
+    block_dim_1d = 256
+    grid_dim_1d = (width * height + block_dim_1d - 1) // block_dim_1d
 
-        start_time = time.perf_counter()
-        sobel_kernel(magnitude_gpu, direction_gpu, blurred_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
-        nms_kernel(nms_gpu, magnitude_gpu, direction_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
-        threshold_kernel(threshold_gpu, nms_gpu, np.int32(width * height), np.float32(th1), np.float32(th2), block=(block_dim_1d,1,1), grid=(grid_dim_1d,1))
-        
-        buffer1_gpu = threshold_gpu
-        buffer2_gpu = nms_gpu
+    start_time = time.perf_counter()
+    sobel_kernel(magnitude_gpu, direction_gpu, blurred_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
+    nms_kernel(nms_gpu, magnitude_gpu, direction_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
+    threshold_kernel(threshold_gpu, nms_gpu, np.int32(width * height), np.float32(th1), np.float32(th2), block=(block_dim_1d,1,1), grid=(grid_dim_1d,1))
+    
+    buffer1_gpu = threshold_gpu
+    buffer2_gpu = nms_gpu
 
-        for _ in range(10):
-            hysteresis_propagate_kernel(buffer2_gpu, buffer1_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
-            buffer1_gpu, buffer2_gpu = buffer2_gpu, buffer1_gpu
-        
-        final_propagated_gpu = buffer1_gpu
+    for _ in range(10):
+        hysteresis_propagate_kernel(buffer2_gpu, buffer1_gpu, np.int32(width), np.int32(height), block=block_dim_2d, grid=grid_dim_2d)
+        buffer1_gpu, buffer2_gpu = buffer2_gpu, buffer1_gpu
+    
+    final_propagated_gpu = buffer1_gpu
 
-        hysteresis_finalize_kernel(final_propagated_gpu, np.int32(width * height), block=(block_dim_1d,1,1), grid=(grid_dim_1d,1))
+    hysteresis_finalize_kernel(final_propagated_gpu, np.int32(width * height), block=(block_dim_1d,1,1), grid=(grid_dim_1d,1))
 
-        ctx.synchronize()
-        end_time = time.perf_counter()
-        print(f"[PyCUDA] apply_canny - Time: {(end_time - start_time) * 1000:.3f} ms")
+    cuda.Context.synchronize()
+    end_time = time.perf_counter()
+    print(f"[PyCUDA] apply_canny - Time: {(end_time - start_time) * 1000:.3f} ms")
 
-        result_img_gray = np.empty_like(gray_img)
-        cuda.memcpy_dtoh(result_img_gray, final_propagated_gpu)
+    result_img_gray = np.empty_like(gray_img)
+    cuda.memcpy_dtoh(result_img_gray, final_propagated_gpu)
 
-        blurred_gpu.free()
-        magnitude_gpu.free()
-        direction_gpu.free()
-        nms_gpu.free()
-        threshold_gpu.free()
+    blurred_gpu.free()
+    magnitude_gpu.free()
+    direction_gpu.free()
+    nms_gpu.free()
+    threshold_gpu.free()
 
-        result_img_bgr = cv2.cvtColor(result_img_gray, cv2.COLOR_GRAY2BGR)
-        return nparray_to_pngbase64str(result_img_bgr)
-    finally:
-        ctx.pop()
+    result_img_bgr = cv2.cvtColor(result_img_gray, cv2.COLOR_GRAY2BGR)
+    return nparray_to_pngbase64str(result_img_bgr)
 
 # --- CUDA Kernel for Warp Affine ---
 
 def apply_warp_affine_pycuda(img_data: str, matrix_str: str) -> str:
     """Applies an affine transformation using a custom PyCUDA kernel with Bilinear Interpolation."""
-    cuda.init()
-    device = cuda.Device(0)
-    ctx = device.make_context()
-    try:
-        mod_warp_affine = SourceModule("""
-        #include <math.h>
+    mod_warp_affine = SourceModule("""
+    #include <math.h>
 
-        __device__ unsigned char get_pixel_value(const unsigned char* src, int x, int y, int width, int height, int channel_offset, int channels) {
+    __device__ unsigned char get_pixel_value(const unsigned char* src, int x, int y, int width, int height, int channel_offset, int channels) {
             if (x < 0 || x >= width || y < 0 || y >= height) {
                 return 0;
             }
@@ -743,105 +718,104 @@ def apply_warp_affine_pycuda(img_data: str, matrix_str: str) -> str:
             }
         }
         """)
-        img = decode_image_base64(img_data)
-        if not isinstance(img, np.ndarray): return img_data
-        img = img.astype(np.uint8)
-        height, width, channels = img.shape
+    img = decode_image_base64(img_data)
+    if not isinstance(img, np.ndarray): return img_data
+    img = img.astype(np.uint8)
+    height, width, channels = img.shape
 
-        vals = list(map(float, matrix_str.strip('[]').split(',')))
-        M = np.array(vals, dtype=np.float32).reshape(2, 3)
-        M_3x3 = np.vstack([M, [0, 0, 1]])
-        try:
-            M_inv_3x3 = np.linalg.inv(M_3x3)
-            M_inv = M_inv_3x3[:2, :].flatten().astype(np.float32)
-        except np.linalg.LinAlgError:
-            print("Warning: Affine matrix is singular. Returning original image.")
-            return nparray_to_pngbase64str(img)
+    vals = list(map(float, matrix_str.strip('[]').split(',')))
+    M = np.array(vals, dtype=np.float32).reshape(2, 3)
+    M_3x3 = np.vstack([M, [0, 0, 1]])
+    try:
+        M_inv_3x3 = np.linalg.inv(M_3x3)
+        M_inv = M_inv_3x3[:2, :].flatten().astype(np.float32)
+    except np.linalg.LinAlgError:
+        print("Warning: Affine matrix is singular. Returning original image.")
+        return nparray_to_pngbase64str(img)
 
-        img_gpu = cuda.mem_alloc(img.nbytes)
-        dest_gpu = cuda.mem_alloc(img.nbytes)
-        matrix_gpu = cuda.mem_alloc(M_inv.nbytes)
-        cuda.memcpy_htod(img_gpu, img)
-        cuda.memcpy_htod(matrix_gpu, M_inv)
+    img_gpu = cuda.mem_alloc(img.nbytes)
+    dest_gpu = cuda.mem_alloc(img.nbytes)
+    matrix_gpu = cuda.mem_alloc(M_inv.nbytes)
+    cuda.memcpy_htod(img_gpu, img)
+    cuda.memcpy_htod(matrix_gpu, M_inv)
 
-        warp_affine_kernel = mod_warp_affine.get_function("warp_affine_bilinear_kernel")
-        block_dim = (16, 16, 1)
-        grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
+    warp_affine_kernel = mod_warp_affine.get_function("warp_affine_bilinear_kernel")
+    block_dim = (16, 16, 1)
+    grid_dim = ((width + block_dim[0] - 1) // block_dim[0], (height + block_dim[1] - 1) // block_dim[1])
 
-        start_event = cuda.Event()
-        end_event = cuda.Event()
-        
-        start_event.record()
-        warp_affine_kernel(
-            dest_gpu, img_gpu,
-            np.int32(width), np.int32(height), np.int32(channels),
-            matrix_gpu,
-            block=block_dim, grid=grid_dim
-        )
-        end_event.record()
-        end_event.synchronize()
-        elapsed_ms = start_event.time_till(end_event)
-        print(f"[PyCUDA] apply_warp_affine - Time: {elapsed_ms:.3f} ms")
+    start_event = cuda.Event()
+    end_event = cuda.Event()
+    
+    start_event.record()
+    warp_affine_kernel(
+        dest_gpu, img_gpu,
+        np.int32(width), np.int32(height), np.int32(channels),
+        matrix_gpu,
+        block=block_dim, grid=grid_dim
+    )
+    end_event.record()
+    end_event.synchronize()
+    elapsed_ms = start_event.time_till(end_event)
+    print(f"[PyCUDA] apply_warp_affine - Time: {elapsed_ms:.3f} ms")
 
-        result_img = np.empty_like(img)
-        cuda.memcpy_dtoh(result_img, dest_gpu)
-        img_gpu.free()
-        dest_gpu.free()
-        matrix_gpu.free()
-        return nparray_to_pngbase64str(result_img)
-    finally:
-        ctx.pop()
+    result_img = np.empty_like(img)
+    cuda.memcpy_dtoh(result_img, dest_gpu)
+    img_gpu.free()
+    dest_gpu.free()
+    matrix_gpu.free()
+    return nparray_to_pngbase64str(result_img)
 
 # --- Main Task Function ---
 
 def Do_Task_CUDA(ImageRegion, MaskRegion, request):
     print('****************preprocessing (PyCUDA)**********************')
     preprocess_task = (request.form.getlist('preprocess_task')[0]).strip('[]').replace('"', '').split(',')
-        
-    if ImageRegion:
-        try:
-            img_data = base64.b64decode(ImageRegion[0])
-            img_np = np.frombuffer(img_data, np.uint8)
-            img_to_save = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-            cv2.imwrite("processed_image.png", img_to_save)
-            print("Processed image saved to processed_image.png")
-        except Exception as e:
-            print(f"Error saving image: {e}")
-            
-    for task in preprocess_task:
-        if not task: continue
-        print(f"task is :{task}")
-        if task == 'GammaCorrection':
-            lut_value = float(request.form.getlist('lut_value')[0])
-            ImageRegion = apply_lut_pycuda(ImageRegion, lut_value)
-        elif task == 'TransformationDegrees':
-            degree = request.form.getlist('degree')[0]
-            ImageRegion = transformation_degrees_pycuda(ImageRegion, degree)
-            if MaskRegion: MaskRegion = transformation_degrees_pycuda(MaskRegion, degree)
-        elif task == 'TransformationFlip':
-            flip_type = request.form.getlist('flip_type')[0]
-            ImageRegion = flip_pycuda(ImageRegion, flip_type)
-            if MaskRegion: MaskRegion = flip_pycuda(MaskRegion, flip_type)
-        elif task == 'Guassian':
-            gaussian_blur_size = int(request.form.getlist('gaussian_blur_size')[0])
-            gaussian_blur_sigma = float(request.form.getlist('gaussian_blur_sigma')[0])
-            ImageRegion = apply_gaussian_blur_pycuda(ImageRegion, gaussian_blur_size, gaussian_blur_sigma)
-        elif task == 'Blur':
-            ksize = int(request.form.getlist('blur_size')[0])
-            ImageRegion = apply_mean_blur_pycuda(ImageRegion, ksize)
-        elif task == 'BilateralFilter':
-            diameter = int(request.form.getlist('diameter')[0])
-            sigmaColor = float(request.form.getlist('sigmaColor')[0])
-            sigmaSpace = float(request.form.getlist('sigmaSpace')[0])
-            ImageRegion = apply_bilateral_filter_pycuda(ImageRegion, diameter, sigmaColor, sigmaSpace)
-        elif task == 'Canny':
-            th1 = float(request.form.getlist('threshold1')[0])
-            th2 = float(request.form.getlist('threshold2')[0])
-            ImageRegion = apply_canny_pycuda(ImageRegion, th1, th2)
-        elif task == 'WarpAffine':
-            matrix_str = request.form.getlist('affine_matrix')[0]
-            ImageRegion = apply_warp_affine_pycuda(ImageRegion, matrix_str)
-        else:
-            print(f"Task '{task}' is not a recognized CUDA function.")
+    
+    with CudaContextManager():
+        if ImageRegion:
+            try:
+                img_data = base64.b64decode(ImageRegion[0])
+                img_np = np.frombuffer(img_data, np.uint8)
+                img_to_save = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+                cv2.imwrite("processed_image.png", img_to_save)
+                print("Processed image saved to processed_image.png")
+            except Exception as e:
+                print(f"Error saving image: {e}")
+                
+        for task in preprocess_task:
+            if not task: continue
+            print(f"task is :{task}")
+            if task == 'GammaCorrection':
+                lut_value = float(request.form.getlist('lut_value')[0])
+                ImageRegion = apply_lut_pycuda(ImageRegion, lut_value)
+            elif task == 'TransformationDegrees':
+                degree = request.form.getlist('degree')[0]
+                ImageRegion = transformation_degrees_pycuda(ImageRegion, degree)
+                if MaskRegion: MaskRegion = transformation_degrees_pycuda(MaskRegion, degree)
+            elif task == 'TransformationFlip':
+                flip_type = request.form.getlist('flip_type')[0]
+                ImageRegion = flip_pycuda(ImageRegion, flip_type)
+                if MaskRegion: MaskRegion = flip_pycuda(MaskRegion, flip_type)
+            elif task == 'Guassian':
+                gaussian_blur_size = int(request.form.getlist('gaussian_blur_size')[0])
+                gaussian_blur_sigma = float(request.form.getlist('gaussian_blur_sigma')[0])
+                ImageRegion = apply_gaussian_blur_pycuda(ImageRegion, gaussian_blur_size, gaussian_blur_sigma)
+            elif task == 'Blur':
+                ksize = int(request.form.getlist('blur_size')[0])
+                ImageRegion = apply_mean_blur_pycuda(ImageRegion, ksize)
+            elif task == 'BilateralFilter':
+                diameter = int(request.form.getlist('diameter')[0])
+                sigmaColor = float(request.form.getlist('sigmaColor')[0])
+                sigmaSpace = float(request.form.getlist('sigmaSpace')[0])
+                ImageRegion = apply_bilateral_filter_pycuda(ImageRegion, diameter, sigmaColor, sigmaSpace)
+            elif task == 'Canny':
+                th1 = float(request.form.getlist('threshold1')[0])
+                th2 = float(request.form.getlist('threshold2')[0])
+                ImageRegion = apply_canny_pycuda(ImageRegion, th1, th2)
+            elif task == 'WarpAffine':
+                matrix_str = request.form.getlist('affine_matrix')[0]
+                ImageRegion = apply_warp_affine_pycuda(ImageRegion, matrix_str)
+            else:
+                print(f"Task '{task}' is not a recognized CUDA function.")
 
     return ([ImageRegion], [MaskRegion])
