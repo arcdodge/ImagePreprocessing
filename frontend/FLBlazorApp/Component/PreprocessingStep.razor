@@ -1,0 +1,110 @@
+﻿@using FLBlazorApp.Data;
+@using Radzen.Blazor
+
+<div class="cardUIcard" style="border: 2px solid @BorderColor;background-color:@BackgroundColor;">
+	<div style="display: flex;">
+		<Switch Value="@Item.IsEnable" ValueChanged="@EnableValueChanged"></Switch>
+		<div class="card-body" style="margin:-30px 0">
+			@switch (Item.TodoType)
+			{
+				case PreprocessingValueType.Combobox:
+					@for (int i = 0; i < Item.Comboboxdata.Count(); i++)
+					{
+						Index = i;
+						var w = i;
+						var item = Item.Comboboxdata[Index];
+						@item.ValueTitle
+						<div style="display: flex;justify-content: center; align-items: center; margin:5px 0 5px 0">
+							<RadzenDropDown Value=@item.SelectedItem ValueChanged="@(args => ComboboxValueChanged( Item.Comboboxdata[w],args))" TValue="string" Data=@item.ChoseItemList />
+						</div>
+					}
+					break;
+
+				case PreprocessingValueType.Slider:
+					@for (int i = 0; i < Item.Sliderdata.Count(); i++)
+					{
+						Index = i;
+						var w = i;
+						var item = Item.Sliderdata[Index];
+						@item.ValueTitle
+						<div style="display: flex;justify-content: center; align-items: center; margin:5px 0 5px 0">
+							<RadzenSlider Value=@item.Value ValueChanged="@(args => SliderValueChanged( Item.Sliderdata[w],args))" TValue="double" Step=@item.Step Min=@item.Min Max=@item.Max Style="margin:0 20px 0 5px;" />
+							<div style="width:30%">
+								<input @bind-value=@item.Value class="form-control" type="text" aria-label="readonly input example" readonly>
+							</div>
+						</div>
+					}
+					break;
+
+				// 新增 Textbox 的 UI
+                case PreprocessingValueType.Textbox:
+					@for (int i = 0; i < Item.Textboxdata.Count; i++)
+					{
+						var box = Item.Textboxdata[i];
+						<div style="margin:5px 0">
+							<label>@box.ValueTitle</label>
+							<div style="display:flex; align-items:center; margin-top:5px;">
+								<RadzenTextBox 
+									TValue="string"
+									Value="@box.Text"
+									Change="@(args => OnTextboxChanged(box, args))"
+									class="form-control" 
+									style="margin-left:10px; width:200px;" />
+							</div>
+						</div>
+					}
+					break;
+			}
+		</div>
+	</div>
+</div>
+@code {
+	private int Index;
+	private string SelectedItem;
+	[Parameter]
+	public PreprocessingTodo Item { get; set; }
+
+	[Parameter]
+	public Action ValueChangedAction { get; set; }
+
+	private void EnableValueChanged(bool val)
+	{
+		Item.IsEnable = val;
+		ValueChangedAction.Invoke();
+	}
+
+	private void SliderValueChanged(PreprocessingSlider item, double val)
+	{
+		item.Value = val;
+		ValueChangedAction.Invoke();
+	}
+	private void ComboboxValueChanged(PreprocessingChose item,string val)
+	{
+		item.SelectedItem = val;
+		ValueChangedAction.Invoke();
+	}
+	    // Textbox 變動時呼叫
+	private void OnTextboxChanged(PreprocessingTextbox box, string newValue)
+	{
+		box.Text = newValue;
+		ValueChangedAction?.Invoke();
+	}
+
+	public string BorderColor
+	{
+		get
+		{
+			if (Item.IsEnable) return "#80d8ff";
+			return "dimgray";
+		}
+	}
+
+	public string BackgroundColor
+	{
+		get
+		{
+			if (Item.IsEnable) return "lightskyblue";
+			return "#4d5e59";
+		}
+	}
+}

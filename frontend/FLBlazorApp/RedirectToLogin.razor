@@ -1,0 +1,24 @@
+﻿@inject NavigationManager Navigation
+@inject IConfiguration configuration;
+@inject Blazored.LocalStorage.ILocalStorageService localStorage
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        RedirectUnauthorized();
+    }
+
+    public async Task RedirectUnauthorized()
+    {
+        var authenticationState = await AuthenticationStateTask;
+
+        if (authenticationState?.User?.Identity is null || !authenticationState.User.Identity.IsAuthenticated)
+        {
+            await localStorage.SetItemAsStringAsync("return_url", Navigation.Uri);
+		    Navigation.NavigateTo(configuration["LoginUrl"], true);
+        }
+    }
+}

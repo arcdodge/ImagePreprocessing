@@ -1,0 +1,61 @@
+﻿@using FLBlazorApp.Data;
+<!-- Sidebar -->
+<div class="@("navbar-nav bg-gradient-primary sidebar sidebar-dark accordion" + (sidebarToggleClicked ? " toggled" : ""))" id="accordionSidebar" style="padd">
+
+	<!-- Sidebar - Brand -->
+	<NavLink class="sidebar-brand d-flex align-items-center justify-content-center" href="" Match="NavLinkMatch.All">
+		<div class="sidebar-brand-icon rotate-n-15">
+			<i class="fa-solid fa-circle-nodes"></i>
+		</div>
+		<div class="sidebar-brand-text mx-3">Final Project<sup>1.0</sup></div>
+	</NavLink>
+
+	<!-- Divider -->
+	<hr class="sidebar-divider my-0">
+	<!-- Nav Item - Dashboard -->
+	<NavLink class="nav-item">
+		<a class="nav-link" href="">
+			<i class="fa-solid fa-gauge-high"></i>
+			<span>Dashboard</span>
+		</a>
+	</NavLink>
+	<!-- Nav Item - Dashboard -->
+	<!-- Divider -->
+	<hr class="sidebar-divider">
+
+	<!-- Heading -->
+	<div class="sidebar-heading">
+		Tools
+	</div>
+	<NavLink class="nav-item" style="@("pointer-events:" + (FLAPIConfig.ReleaseVersion != "FET"? " auto":"none"))">
+		<a class="nav-link" href="pre-processing">
+			<i class="fa-solid fa-pen-to-square"></i>
+			<span>Pre-processing</span>
+		</a>
+	</NavLink>
+
+@*	<!-- Divider -->
+	<hr class="sidebar-divider d-none d-md-block">
+	<NavLink class="nav-item" style="@("pointer-events:" + (FLAPIConfig.ReleaseVersion != "FET"? " auto":"none"))">
+		<a class="nav-link" href="test">
+			<i class="fa-solid fa-flask-vial"></i>
+			<span>Testing Page</span>
+		</a>
+	</NavLink>
+	<!-- Divider -->*@
+	<hr class="sidebar-divider">
+	<!-- Sidebar Toggler (Sidebar) -->
+	<div class="text-center d-none d-md-inline">
+		<button class="rounded-circle border-0" id="sidebarToggle" @onclick="SidebarToggleChange"></button>
+	</div>
+</div>
+<!-- End of Sidebar -->
+@code
+{
+	private bool sidebarToggleClicked = false;
+
+	private void SidebarToggleChange()
+	{
+		sidebarToggleClicked = !sidebarToggleClicked;
+	}
+}

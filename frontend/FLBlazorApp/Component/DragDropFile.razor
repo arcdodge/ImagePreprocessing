@@ -1,0 +1,132 @@
+﻿@using BlazorInputFile
+@inject IJSRuntime jsRuntime
+
+<div style="width: 100%">
+	<div class="col-12 p-0">
+		@if (!string.IsNullOrEmpty(uploadedFileName))
+		{
+			<div class="dropzone @dropClass rounded">
+				<div class="center-text">
+					@uploadedFileName
+				</div>
+				<BlazorInputFile.InputFile id="fileInput" title=""
+									   OnChange="HandleFileInputChange"
+									   accept="application/json"
+									   @ondragenter="HandleDragEnter"
+									   @ondragleave="HandleDragLeave" />
+			</div>
+			<button class="btn btn-link text-danger p-0 pl-1" type="button" @onclick="RemoveFile">
+				<small class="align-text-bottom">Remove</small>
+			</button>
+		}
+		else
+		{
+			<div class="dropzone @dropClass rounded">
+				<div class="center-text">
+					Upload file.<br>
+					(Drag or chose the file)
+				</div>
+				<BlazorInputFile.InputFile id="fileInput" title=""
+									   OnChange="HandleFileInputChange"
+									   accept="application/json"
+									   @ondragenter="HandleDragEnter"
+									   @ondragleave="HandleDragLeave" />
+			</div>
+		}
+
+		@if ((fileTypeError || fileSizeError))
+		{
+			<ul class="validation-errors mb-0">
+				@if (fileTypeError)
+				{
+					<li class="validation-message">Only json file are accepted.</li>
+				}
+				@if (fileSizeError)
+				{
+					<li class="validation-message">The max file size is @MaxFileSizeMB MB.</li>
+				}
+			</ul>
+		}
+	</div>
+</div>
+
+@code {
+	const int MaxFileSizeMB = 5;
+	const int MaxFileSize = MaxFileSizeMB * 1024 * 1024; // 5MB
+	private string dropClass = "";
+	private bool fileSizeError = false;
+	private bool fileTypeError = false;
+	private IFileListEntry selectedFile;
+
+	public IFileListEntry SelectedFile
+	{
+		get { return selectedFile; }
+		set
+		{
+			selectedFile = value;
+			InvokeFile();
+		}
+	}
+
+	[Parameter]
+	public int InitIndex { get; set; }
+
+	[Parameter]
+	public EventCallback<(IFileListEntry,int)> FileChanged { get; set; }
+
+	private async Task InvokeFile()
+	{
+		await FileChanged.InvokeAsync((SelectedFile, InitIndex));
+	}
+
+	private string uploadedFileName = string.Empty;
+
+	private void HandleDragEnter()
+	{
+		dropClass = "dropzone-drag";
+	}
+
+	private void HandleDragLeave()
+	{
+		dropClass = "";
+	}
+
+	private async Task HandleFileInputChange(IFileListEntry[] files)
+	{
+		if (!string.IsNullOrEmpty(uploadedFileName)) RemoveFile();
+
+		dropClass = "";
+		fileSizeError = false;
+		fileTypeError = false;
+		List<string> acceptedFileTypes = new List<string>() { "application/json" };
+
+		if (files != null && files.Length > 0)
+		{
+			var file = files[0]; // 僅處理第一個文件
+			bool error = false;
+			if (file.Size > MaxFileSize)
+			{
+				error = true;
+				fileSizeError = true;
+			}
+
+			if (!acceptedFileTypes.Contains(file.Type))
+			{
+				error = true;
+				fileTypeError = true;
+			}
+
+			if (!error)
+			{
+				SelectedFile = file;
+				uploadedFileName = file.Name; // 設置上傳檔案的名稱
+			}
+		}
+	}
+
+	private void RemoveFile()
+	{
+		SelectedFile = null;
+		uploadedFileName = string.Empty;
+	}
+}

@@ -1,0 +1,30 @@
+﻿@page "/"
+
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using Microsoft.AspNetCore.SignalR.Client;
+@using FLBlazorApp.ViewModel;
+@using FLBlazorApp.Data;
+
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Federated Learning</PageTitle>
+<div class="main">
+
+</div>
+@code {
+	private bool getAPIServerError;
+	private bool shouldRender;
+
+	protected override bool ShouldRender() => shouldRender;
+
+	protected override async Task OnInitializedAsync()
+	{
+		shouldRender = true;
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+	}
+}

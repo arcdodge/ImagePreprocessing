@@ -1,0 +1,1 @@
+FILE_ROOT = '~/workspace/final_project/last/slides/'

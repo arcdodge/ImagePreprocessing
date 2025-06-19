@@ -1,0 +1,22 @@
+﻿@inject Radzen.DialogService ds
+<h3>RecipeSelector</h3>
+<RadzenStack Gap="1.5rem">
+	<label>SelectedFile = @FileName</label>
+	<FileBrowser DirectoryPath=@RecipePath.DirectoryPath @bind-SelectedPath=@RecipePath.SelectedPath IsDirectory=false AllowedFileExtensions="@AllowedFileExtensions"></FileBrowser>
+	<RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+		<RadzenStack Orientation="Orientation.Horizontal">
+			<RadzenButton Text="Ok" Click="() => ds.Close(true)" Style="width: 80px;" />
+			<RadzenButton Text="Cancel" Click="() => ds.Close(false)" ButtonStyle="Radzen.ButtonStyle.Light" />
+		</RadzenStack>
+	</RadzenStack>
+</RadzenStack>
+@code {
+
+	[Parameter]
+	public Data.RecipePath RecipePath { get; set; }
+
+	[Parameter]
+	public List<string> AllowedFileExtensions { get; set; } = new List<string>();
+
+	public string FileName { get => Path.GetFileName(RecipePath.SelectedPath); }
+}

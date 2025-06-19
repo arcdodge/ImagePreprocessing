@@ -1,0 +1,169 @@
+﻿@using System.IO
+@using System.Text.RegularExpressions;
+
+<RadzenCard Style="margin-right: 50px;">
+	<RadzenTree Data=@entries Expand=@LoadFiles Style="width: 100%; height: 30px" @bind-Value=@selection Change=@OnChange>
+		<RadzenTreeLevel Text=@GetTextForNode Template=@FileOrFolderTemplate />
+	</RadzenTree>
+</RadzenCard>
+
+@code {
+	private string _DirectorPath = Directory.GetCurrentDirectory();
+	private List<string> allowedDirectoryExtensions = new List<string> { ".folder" };
+
+	[Parameter]
+	public string DirectoryPath
+	{
+		get
+		{
+			return _DirectorPath;
+		}
+		set
+		{
+			var old = _DirectorPath;
+			_DirectorPath = value;
+
+			// Re-initialize
+			if (old != value)
+			{
+				UpdateEntries();
+			}
+		}
+	}
+
+	[Parameter]
+	public string SelectedPath
+	{
+		get
+		{
+			// Escape null
+			var selected = selection;
+			if (selected == null)
+			{
+				selected = "";
+			}
+			return selected.ToString();
+		}
+		set
+		{
+			selection = value;
+			UpdateEntries();
+			SelectEntry();
+		}
+	}
+	[Parameter]
+	public EventCallback<string> SelectedPathChanged { get; set; }
+	async Task UpdateSelectedPath()
+	{
+		await SelectedPathChanged.InvokeAsync(SelectedPath);
+	}
+
+	[Parameter]
+	public bool IsDirectory { get; set; } = false;
+
+	[Parameter]
+	public List<string> AllowedFileExtensions { get; set; } = new List<string> ();
+
+	[Parameter]
+	public string IgnorePatterns { get; set; } = "";
+
+	object selection { get; set; }
+
+	private void SelectEntry()
+	{
+		if (entries.Contains(SelectedPath))
+		{
+			selection = entries.First(entry => entry == SelectedPath);
+		}
+		else if (!SelectedPath.Contains(DirectoryPath))
+		{
+			selection = entries.FirstOrDefault();
+		}
+	}
+
+	IEnumerable<string> entries;
+
+	protected override void OnInitialized()
+	{
+		UpdateEntries();
+		SelectEntry();
+
+		if (selection == null && entries.Any())
+		{
+			selection = entries.First();
+			UpdateSelectedPath();
+		}
+	}
+
+	private void UpdateEntries()
+	{
+		TreeExpandEventArgs args = new();
+		args.Children = new();
+		args.Value = DirectoryPath;
+		LoadFiles(args);
+		entries = args.Children.Data as IEnumerable<string>;
+	}
+
+	void LoadFiles(TreeExpandEventArgs args)
+	{
+		var directory = args.Value as string;
+
+		if (Directory.Exists(directory))
+		{
+			if (IsDirectory)
+			{
+				args.Children.Data = FilterFile(Directory.GetDirectories(directory), allowedDirectoryExtensions);
+			}
+			else
+			{
+				args.Children.Data = FilterFile(Directory.EnumerateFileSystemEntries(directory), AllowedFileExtensions);
+			}
+		}
+		args.Children.Text = GetTextForNode;
+		args.Children.HasChildren = (path) => Directory.Exists((string)path);
+		args.Children.Template = FileOrFolderTemplate;
+	}
+
+	private IEnumerable<string> FilterFile(IEnumerable<string> entries, List<string> allowedExtensions)
+	{
+		var ignore_patterns = IgnorePatterns.Trim().Split("\n").Select(pattern => pattern.Trim().TrimEnd('\r')).Where(pattern => !(string.IsNullOrEmpty(pattern)));
+		foreach (string pattern in ignore_patterns)
+		{
+			entries = entries.Where(entry =>
+			{
+				return !Regex.IsMatch(entry, pattern);
+			});
+		}
+
+		if (allowedExtensions.Count() != 0 && !IsDirectory)
+		{
+			entries = entries.Where(entry =>
+			{
+				string extension = Path.GetExtension(entry);
+				return allowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+			});
+		}
+		return entries;
+	}
+
+	string GetTextForNode(object data)
+	{
+		return Path.GetFileName((string)data);
+	}
+
+	RenderFragment<RadzenTreeItem> FileOrFolderTemplate = (context) => builder =>
+	{
+		string path = context.Value as string;
+		bool isDirectory = Directory.Exists(path);
+
+		builder.OpenComponent<RadzenIcon>(0);
+		builder.AddAttribute(1, nameof(RadzenIcon.Icon), isDirectory ? "folder" : "insert_drive_file");
+		builder.CloseComponent();
+		builder.AddContent(3, context.Text);
+	};
+
+	void OnChange()
+	{
+		UpdateSelectedPath();
+	}
+}

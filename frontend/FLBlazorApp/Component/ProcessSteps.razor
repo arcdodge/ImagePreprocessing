@@ -1,0 +1,124 @@
+﻿@using FLBlazorApp.Data;
+<div class="steps-container">
+	@for (int i = 0; i < Steps.Count; i++)
+	{
+		@switch (Steps[i].Status)
+		{
+			case StepInfoStatus.pending:
+				<div class="step">
+					<div class="label">
+						@Steps[i].StepName
+					</div>
+					<div class="icon">
+						<i class="@(Steps[i].IconName)"></i>
+					</div>
+				</div>
+				@if (i != Steps.Count - 1)
+				{
+					<div class="line"></div>
+				}
+				break;
+
+			case StepInfoStatus.loading:
+				<div class="step in-progress">
+					<div class="preloader"></div>
+					<div class="label loading">
+						@Steps[i].StepName
+					</div>
+					<div class="icon in-progress">
+						<i class="@(Steps[i].IconName)"></i>
+					</div>
+				</div>
+				@if (i != Steps.Count - 1)
+				{
+					<div class="line prev-step-in-progress"></div>
+				}
+				break;
+
+			case StepInfoStatus.completed:
+				<div class="step completed">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+						<path d="M20.285 2l-11.285 11.567-5.286-5.011-3.714 3.716 9 8.728 15-15.285z" />
+					</svg>
+					<div class="label completed">
+						@Steps[i].StepName
+					</div>
+					<div class="icon completed">
+						<i class="@(Steps[i].IconName)"></i>
+					</div>
+				</div>
+				@if (i != Steps.Count - 1)
+				{
+					@if (Steps[i + 1].Status == StepInfoStatus.loading)
+					{
+						<div class="line next-step-in-progress"></div>
+					}
+					else if (Steps[i + 1].Status == StepInfoStatus.completed)
+					{
+						<div class="line completed"></div>
+					}
+					else
+					{
+						<div class="line line next-step-error"></div>
+					}
+				}
+				break;
+
+			case StepInfoStatus.error:
+				<div class="step completed" style="background-color:red">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-1 2 14 14">
+						<path d="M11.383 13.644A1.03 1.03 0 0 1 9.928 15.1L6 11.172 2.072 15.1a1.03 1.03 0 1 1-1.455-1.456l3.928-3.928L.617 5.79a1.03 1.03 0 1 1 1.455-1.456L6 8.261l3.928-3.928a1.03 1.03 0 0 1 1.455 1.456L7.455 9.716z" />
+					</svg>
+					<div class="label" style="color:red">
+						@Steps[i].StepName
+					</div>
+					<div class="icon" style="color:red">
+						<i class="@(Steps[i].IconName)"></i>
+					</div>
+				</div>
+				<div class="line"></div>
+				@if (i != Steps.Count - 1)
+				{
+					@if (Steps[i + 1].Status == StepInfoStatus.loading)
+					{
+						<div class="line next-step-in-progress"></div>
+					}
+					else if (Steps[i + 1].Status == StepInfoStatus.completed)
+					{
+						<div class="line completed"></div>
+					}
+				}
+				break;
+
+			case StepInfoStatus.stop:
+				<div class="step completed" style="background-color:red">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-1 2 14 14">
+						<path d="M -1 11 L -1 7 L 13 7 L 13 11 z" />
+					</svg>
+					<div class="label" style="color:red">
+						@Steps[i].StepName
+					</div>
+					<div class="icon" style="color:red">
+						<i class="@(Steps[i].IconName)"></i>
+					</div>
+				</div>
+				<div class="line"></div>
+				@if (i != Steps.Count - 1)
+				{
+					@if (Steps[i + 1].Status == StepInfoStatus.loading)
+					{
+						<div class="line next-step-in-progress"></div>
+					}
+					else if (Steps[i + 1].Status == StepInfoStatus.completed)
+					{
+						<div class="line completed"></div>
+					}
+				}
+				break;
+		}
+	}
+</div>
+@code {
+	[Parameter]
+	public List<StepInfo> Steps { get; set; } = new List<StepInfo>();
+}
