@@ -772,16 +772,6 @@ def Do_Task_CUDA(ImageRegion, MaskRegion, request):
     preprocess_task = (request.form.getlist('preprocess_task')[0]).strip('[]').replace('"', '').split(',')
     
     with CudaContextManager():
-        if ImageRegion:
-            try:
-                img_data = base64.b64decode(ImageRegion[0])
-                img_np = np.frombuffer(img_data, np.uint8)
-                img_to_save = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-                cv2.imwrite("processed_image.png", img_to_save)
-                print("Processed image saved to processed_image.png")
-            except Exception as e:
-                print(f"Error saving image: {e}")
-                
         for task in preprocess_task:
             if not task: continue
             print(f"task is :{task}")
