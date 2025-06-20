@@ -109,9 +109,22 @@ dotnet run
 3.  **載入影像**：
     前端介面應提供一個檔案瀏覽器或上傳功能。選擇您放在 `slides` 資料夾中的影像檔案。此操作會觸發對後端 `loadImage` API 的呼叫。後端會處理影像，並回傳縮圖及影像基本資訊給前端顯示。
 
-4.  **互動式檢視與處理**：<img src="assets/GUI_2.png" alt="互動式檢視介面" width="400" align="right">
+<table>
+<tr>
+<td valign="top">
+
+4.  **互動式檢視與處理**：
 ![區域選取](assets/GUI_3.png)
     *   **區域選取與處理**：在前端顯示縮圖介面上用滑鼠點擊選取一個感興趣的區域 (Region of Interest, ROI)。此操作會呼叫後端的 `getRegion` API，傳送所選區域的座標和大小。後端會擷取該區域，進行前處理（如果設定了 CUDA，會嘗試使用 GPU 加速），並將處理後的影像回傳給前端顯示。
+
+</td>
+<td valign="top">
+
+<img src="assets/GUI_2.png" alt="互動式檢視介面" width="400">
+
+</td>
+</tr>
+</table>
 
 透過以上步驟，您可以完整體驗從載入影像到互動式分析的整個流程。
 
