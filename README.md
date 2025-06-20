@@ -1,5 +1,5 @@
 # 大型醫療影像檢視與處理平台
-
+![介面示意圖](assets/GUI_1.png)
 這是一個前後端分離的專案，旨在提供一個能夠處理、檢視並分析大型醫療影像（如病理切片）的平台。
 
 ## 功能特色
@@ -109,7 +109,10 @@ dotnet run
 3.  **載入影像**：
     前端介面應提供一個檔案瀏覽器或上傳功能。選擇您放在 `slides` 資料夾中的影像檔案。此操作會觸發對後端 `loadImage` API 的呼叫。後端會處理影像，並回傳縮圖及影像基本資訊給前端顯示。
 
+<img src="assets/GUI_2.png" alt="互動式檢視介面" width="400" align="right">
+
 4.  **互動式檢視與處理**：
+![區域選取](assets/GUI_3.png)
     *   **區域選取與處理**：在前端顯示縮圖介面上用滑鼠點擊選取一個感興趣的區域 (Region of Interest, ROI)。此操作會呼叫後端的 `getRegion` API，傳送所選區域的座標和大小。後端會擷取該區域，進行前處理（如果設定了 CUDA，會嘗試使用 GPU 加速），並將處理後的影像回傳給前端顯示。
 
 透過以上步驟，您可以完整體驗從載入影像到互動式分析的整個流程。
@@ -164,3 +167,46 @@ python benchmark.py [OPTIONS]
     ```bash
     python benchmark.py --image_path /path/to/your/large_image.tiff --width 800 --height 600
     ```
+
+### 測試結果範例
+
+以下是使用一張 5000x5000 的影像 (`slide_5000.png`) 進行測試的結果，以展示不同加速模式的效能差異。
+
+**執行指令：**
+```bash
+python benchmark.py --image_path slide_5000.png
+```
+
+**輸出結果：**
+```
+==================== 測試任務: Blur (加速: CPU, 最終尺寸: 5000x5000) ====================
+參數: {'blur_size': 15}
+--- 執行 CPU/OpenCV 版本 (由 preprocessing 模組自動選擇) ---
+[CPU] apply_mean_blur - Time: 396.034 ms
+耗時: 1316.097 ms
+
+==================== 測試任務: Blur (加速: CVCUDA, 最終尺寸: 5000x5000) ====================
+參數: {'blur_size': 15}
+--- 執行 CPU/OpenCV 版本 (由 preprocessing 模組自動選擇) ---
+[OpenCV CUDA] apply_mean_blur_opencv_cuda - Time: 6.909 ms
+耗時: 1026.665 ms
+
+==================== 測試任務: Blur (加速: PyCUDA, 最終尺寸: 5000x5000) ====================
+參數: {'blur_size': 15}
+--- 執行 PyCUDA 版本 ---
+[PyCUDA] apply_mean_blur_pycuda - Time: 4.203 ms
+耗時: 1074.031 ms
+
+--- 結果比較 ---
+  - ✅ 圖像完全一致: CPU vs OpenCV CUDA
+  - ✅ 圖像完全一致: CPU vs PyCUDA
+  - ✅ 圖像完全一致: OpenCV CUDA vs PyCUDA
+```
+
+**結果分析：**
+從日誌中可以清楚看到，對於 5000x5000 的高解析度影像，單純的 `Blur` 核心運算時間：
+*   **CPU**: 約 396 ms
+*   **OpenCV CUDA**: 約 6.9 ms
+*   **PyCUDA**: 約 4.2 ms
+
+這顯示了使用 GPU (無論是 OpenCV CUDA 還是 PyCUDA) 進行加速，其運算速度遠遠超過僅使用 CPU 的情況。雖然總耗時 (`耗時: ...`) 還包含了圖片編解碼等其他開銷，但在核心運算上，效能提升是顯而易見的。
