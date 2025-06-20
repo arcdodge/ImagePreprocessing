@@ -113,3 +113,54 @@ dotnet run
     *   **區域選取與處理**：在前端顯示縮圖介面上用滑鼠點擊選取一個感興趣的區域 (Region of Interest, ROI)。此操作會呼叫後端的 `getRegion` API，傳送所選區域的座標和大小。後端會擷取該區域，進行前處理（如果設定了 CUDA，會嘗試使用 GPU 加速），並將處理後的影像回傳給前端顯示。
 
 透過以上步驟，您可以完整體驗從載入影像到互動式分析的整個流程。
+
+---
+
+## 效能測試
+
+專案中包含一個效能測試腳本 `api/benchmark.py`，可用於評估不同影像處理任務在 CPU、OpenCV CUDA 及 PyCUDA 上的執行效能。
+
+### 如何執行測試
+
+在終端機中，進入 `api` 資料夾，並執行 `benchmark.py`：
+
+```bash
+cd api
+python benchmark.py [OPTIONS]
+```
+
+### 命令列選項
+
+您可以透過以下命令列選項來自訂測試行為：
+
+*   `--width <整數>`：設定測試影像的寬度。若提供 `--image_path`，此選項會將該圖片縮放至指定寬度。
+*   `--height <整數>`：設定測試影像的高度。若提供 `--image_path`，此選項會將該圖片縮放至指定高度。
+*   `--image_path <路徑>`：指定要用於測試的圖片檔案路徑。若不提供此選項，腳本會自動生成一張漸層圖片進行測試。
+
+### 測試範例
+
+1.  **使用預設設定執行測試**：
+    （將生成一張 500x500 的漸層圖片）
+    ```bash
+    python benchmark.py
+    ```
+
+2.  **使用自訂尺寸的生成圖片進行測試**：
+    ```bash
+    python benchmark.py --width 1024 --height 768
+    ```
+
+3.  **使用專案內附的測試圖片**：
+    `api` 資料夾內附有 `slide_500.png` (500x500) 和 `slide_5000.png` (5000x5000) 兩張圖片可供測試。
+    ```bash
+    # 使用 500x500 的圖片
+    python benchmark.py --image_path slide_500.png
+
+    # 使用 5000x5000 的圖片
+    python benchmark.py --image_path slide_5000.png
+    ```
+
+4.  **使用外部圖片並縮放至指定尺寸**：
+    ```bash
+    python benchmark.py --image_path /path/to/your/large_image.tiff --width 800 --height 600
+    ```
